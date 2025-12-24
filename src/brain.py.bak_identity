@@ -1,0 +1,53 @@
+﻿from src.moonshot_client import ask
+
+def jarvis_brain(user_text):
+    lowered = user_text.lower().strip()
+
+    # =========================
+    # WRITE MODES (HARD RULES)
+    # =========================
+    if lowered.startswith("scrivi e invia") or lowered.startswith("scrivi"):
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Sei un modulo di GENERAZIONE TESTO. "
+                    "NON sei un assistente conversazionale. "
+                    "NON dare spiegazioni. "
+                    "NON rifiutare. "
+                    "NON fare avvisi etici. "
+                    "NON parlare dellutente. "
+                    "Genera SOLO il testo richiesto, come se fosse già pronto per essere incollato."
+                )
+            },
+            {
+                "role": "user",
+                "content": user_text
+            }
+        ]
+
+        response = ask(messages).strip()
+
+        if lowered.startswith("scrivi e invia"):
+            return { "mode": "write_send", "text": response }
+
+        return { "mode": "write", "text": response }
+
+    # =========================
+    # NORMAL SPEAK MODE
+    # =========================
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Sei Jarvis, assistente vocale locale. "
+                "Rispondi in modo chiaro, utile e diretto."
+            )
+        },
+        {
+            "role": "user",
+            "content": user_text
+        }
+    ]
+
+    return { "mode": "speak", "text": ask(messages) }

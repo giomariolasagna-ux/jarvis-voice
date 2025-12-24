@@ -1,0 +1,63 @@
+﻿from pynput import mouse
+import threading
+from src.stt import record_while_pressed, transcribe_audio
+from src.brain import jarvis_brain
+from src.tts import speak, stop_speaking
+
+recording = False
+audio_buffer = None
+record_thread = None
+speaking = False
+
+def recording_worker():
+    global audio_buffer, recording
+    audio_buffer = record_while_pressed(lambda: recording)
+
+def on_click(x, y, button, pressed):
+    global recording, record_thread, audio_buffer, speaking
+
+    if button.name != "x1":
+        return
+
+    #  SE STA PARLANDO  INTERROMPI E REGISTRA
+    if pressed and speaking:
+        stop_speaking()
+        speaking = False
+        recording = True
+        record_thread = threading.Thread(target=recording_worker)
+        record_thread.start()
+        return
+
+    #  START recording
+    if pressed and not recording:
+        recording = True
+        record_thread = threading.Thread(target=recording_worker)
+        record_thread.start()
+
+    #  STOP recording  risposta
+    elif not pressed and recording:
+        recording = False
+        record_thread.join()
+
+        if audio_buffer is None:
+            return
+
+        text = transcribe_audio(audio_buffer)
+        audio_buffer = None
+
+        if not text or not text.strip():
+            return
+
+        def think_and_speak():
+            global speaking
+            speaking = True
+            response = jarvis_brain(text)
+            speak(response)
+            speaking = False
+
+        threading.Thread(target=think_and_speak, daemon=True).start()
+        record_thread = None
+
+print("Jarvis pronto. Premi X1 per parlare, interrompere, riparlare.")
+with mouse.Listener(on_click=on_click) as listener:
+    listener.join()

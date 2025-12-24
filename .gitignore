@@ -1,0 +1,7 @@
+﻿.venv/
+__pycache__/
+*.pyc
+C:/Temp/
+logs/
+*.log
+.env

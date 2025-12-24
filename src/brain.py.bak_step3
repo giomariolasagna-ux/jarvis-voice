@@ -1,0 +1,56 @@
+﻿import json
+from pathlib import Path
+from src.moonshot_client import ask
+
+IDENTITY_PATH = Path(r"C:\Users\Administrator\JARVIS_VOICE\jarvis_identity.json")
+
+def load_identity():
+    try:
+        with open(IDENTITY_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+IDENTITY = load_identity()
+
+def jarvis_brain(user_text):
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Sei Jarvis, assistente vocale locale. "
+                "Se l'utente chiede di SCRIVERE testo, "
+                "rispondi SOLO con il testo da scrivere, "
+                "senza commenti, senza virgolette, senza spiegazioni. "
+                "Altrimenti rispondi normalmente."
+            )
+        },
+        {
+            "role": "user",
+            "content": user_text
+        }
+    ]
+
+    response = ask(messages)
+
+    lowered = user_text.lower().strip()
+
+    if lowered.startswith("scrivi e invia"):
+        return {
+            "mode": "write_send",
+            "text": response.strip(),
+            "identity": IDENTITY
+        }
+
+    if lowered.startswith("scrivi"):
+        return {
+            "mode": "write",
+            "text": response.strip(),
+            "identity": IDENTITY
+        }
+
+    return {
+        "mode": "speak",
+        "text": response,
+        "identity": IDENTITY
+    }
