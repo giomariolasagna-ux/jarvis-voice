@@ -5,7 +5,7 @@ import time
 import re
 from pathlib import Path
 
-# --- IMPORTAZIONI ---
+# --- IMPORTAZIONI AUTOMAZIONE ---
 try:
     import pyautogui
     import pyperclip
@@ -13,26 +13,32 @@ except ImportError:
     pyautogui = None
     pyperclip = None
 
+# --- IMPORTAZIONI AI (ROBUSTE) ---
+# Cerchiamo il client Moonshot in due modi per evitare errori di percorso
 try:
+    # Tentativo 1: Importazione assoluta (se avviato da root)
     from src.moonshot_client import ask
 except ImportError:
-    def ask(prompt): return "Errore critico: Client Moonshot non trovato."
+    try:
+        # Tentativo 2: Importazione relativa (se sono nella stessa cartella)
+        from moonshot_client import ask
+    except ImportError as e:
+        # Se fallisce tutto, mostra l'errore REALE (es. manca 'requests')
+        def ask(prompt): return f"ERRORE IMPORT REALE: {e}"
 
 # --- CARICAMENTO CONFIGURAZIONE ---
 IDENTITY_PATH = Path(r"C:\Users\Administrator\JARVIS_VOICE\jarvis_identity.json")
 
 def load_identity():
     if not IDENTITY_PATH.exists():
-        raise FileNotFoundError(f"Manca {IDENTITY_PATH}")
+        # Fallback se manca il file identity
+        return {"self_path": r"C:\Users\Administrator\JARVIS_VOICE", "dev_path": r"C:\Users\Administrator\JARVIS_DEV"}
     with open(IDENTITY_PATH, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
-print(f"Loading identity...")
 IDENTITY = load_identity()
-
 SELF_PATH = Path(IDENTITY.get("self_path", r"C:\Users\Administrator\JARVIS_VOICE"))
 DEV_PATH = Path(IDENTITY.get("dev_path", r"C:\Users\Administrator\JARVIS_DEV"))
-MUTABLE_PATH = Path(IDENTITY.get("mutable_path", r"C:\Users\Administrator\JARVIS_VOICE\mutable_memory"))
 
 # --- STRUMENTI ---
 def create_file_in_dev(filename, content):
@@ -42,7 +48,7 @@ def create_file_in_dev(filename, content):
         target.parent.mkdir(parents=True, exist_ok=True)
         with open(target, "w", encoding="utf-8") as f:
             f.write(content)
-        return f"File {filename} creato." # Risposta brevissima
+        return f"File {filename} creato."
     except Exception as e:
         return f"Errore: {e}"
 
@@ -58,18 +64,17 @@ def parse_tool(text):
 
 # --- LOGICA PRINCIPALE ---
 def jarvis_brain(user_text):
-    print(f"Input: {user_text}")
+    print(f"Brain Input: {user_text}")
     if not user_text: return None
     clean = user_text.strip().lower()
 
     # 1. SCRITTURA RAPIDA
     if clean.startswith("scrivi"):
-        if not pyautogui: return "No moduli."
+        if not pyautogui: return "No moduli automazione."
         send = "e invia" in clean
         prompt = user_text.strip()[6:].replace("e invia", "", 1).strip()
         
         try:
-            # System prompt per scrittura: Solo il testo, niente altro
             res = ask([{"role": "system", "content": "Genera SOLO il testo richiesto."}, {"role": "user", "content": prompt}])
             txt = res["choices"][0]["message"]["content"] if isinstance(res, dict) else str(res)
             pyperclip.copy(txt)
@@ -80,31 +85,29 @@ def jarvis_brain(user_text):
                 pyautogui.press("enter")
                 return "Inviato."
             return "Fatto."
-        except: return "Errore."
+        except Exception as e: return f"Errore Scrittura: {e}"
 
-    # 2. INTELLIGENZA GENERALE (Optimized for Speed)
-    # Istruzioni aggiornate: "Risposte telegrafiche"
+    # 2. INTELLIGENZA GENERALE
     sys_prompt = f"""
     Sei Jarvis. Rispondi in italiano.
+    PERCORSI: ORIGINE={SELF_PATH}, DEV={DEV_PATH}
     
-    DIRETTIVA VELOCITÀ: Sii telegrafico. Usa meno parole possibili.
-    Se devi fare un'azione, falla e basta.
-    
-    PERCORSI:
-    - READ-ONLY: {SELF_PATH}
-    - READ-WRITE: {DEV_PATH}
-    
-    TOOL CREAZIONE FILE (JSON Obbligatorio):
-    {{ "tool": "create_file", "filename": "...", "content": "..." }}
+    Se devi creare file usa JSON: {{ "tool": "create_file", "filename": "...", "content": "..." }}
     """
     
     try:
-        res = ask([{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_text}])
-        reply = res["choices"][0]["message"]["content"] if isinstance(res, dict) else str(res)
+        # Chiamata al client AI
+        response = ask([{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_text}])
+        
+        # Gestione errori di rete/API
+        if isinstance(response, dict) and "error" in response:
+            return f"Errore API Moonshot: {response['error']['message']}"
+            
+        reply = response["choices"][0]["message"]["content"] if isinstance(response, dict) else str(response)
         
         tool_out = parse_tool(reply)
         if tool_out: return tool_out
         
         return reply
     except Exception as e:
-        return "Errore connessione."
+        return f"Errore Brain Critico: {e}"

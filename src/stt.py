@@ -1,4 +1,4 @@
-﻿import threading
+import threading
 _MIC_LOCK = threading.Lock()
 from openai import OpenAI
 import sounddevice as sd
@@ -14,14 +14,14 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 
 #  BLOCCO PER NOME (NON PER INDICE)
-TARGET_NAME = "LifeCam"
+TARGET_NAME = ""
 
 def find_mic():
     devices = sd.query_devices()
     for i, d in enumerate(devices):
         if d["max_input_channels"] > 0 and TARGET_NAME in d["name"]:
             return i, d
-    raise RuntimeError("Microfono LifeCam non trovato")
+    raise RuntimeError("Nessun microfono trovato")
 
 MIC_INDEX, DEVICE_INFO = find_mic()
 REAL_CHANNELS = DEVICE_INFO["max_input_channels"]
@@ -30,7 +30,7 @@ print(f" Using device: {DEVICE_INFO['name']} | Channels: {REAL_CHANNELS}")
 
 def record_while_pressed(is_recording_fn):
     if not _MIC_LOCK.acquire(blocking=False):
-        print("Microfono già in uso, skip recording")
+        print("Microfono gi� in uso, skip recording")
         return None
 
     q = queue.Queue()
@@ -85,4 +85,6 @@ def transcribe_audio(audio):
 
     os.remove(path)
     return result.text
+
+
 
