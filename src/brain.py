@@ -2,9 +2,10 @@
 import os
 import sys
 import time
+import re
 from pathlib import Path
 
-# --- LIBRERIE AUTOMAZIONE ---
+# --- IMPORTAZIONI ---
 try:
     import pyautogui
     import pyperclip
@@ -12,12 +13,12 @@ except ImportError:
     pyautogui = None
     pyperclip = None
 
-# Client AI
 try:
     from src.moonshot_client import ask
 except ImportError:
     def ask(prompt): return "Errore critico: Client Moonshot non trovato."
 
+# --- CARICAMENTO CONFIGURAZIONE ---
 IDENTITY_PATH = Path(r"C:\Users\Administrator\JARVIS_VOICE\jarvis_identity.json")
 
 def load_identity():
@@ -29,80 +30,81 @@ def load_identity():
 print(f"Loading identity...")
 IDENTITY = load_identity()
 
+SELF_PATH = Path(IDENTITY.get("self_path", r"C:\Users\Administrator\JARVIS_VOICE"))
+DEV_PATH = Path(IDENTITY.get("dev_path", r"C:\Users\Administrator\JARVIS_DEV"))
 MUTABLE_PATH = Path(IDENTITY.get("mutable_path", r"C:\Users\Administrator\JARVIS_VOICE\mutable_memory"))
 
+# --- STRUMENTI ---
+def create_file_in_dev(filename, content):
+    try:
+        filename = os.path.basename(filename) 
+        target = DEV_PATH / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"File {filename} creato." # Risposta brevissima
+    except Exception as e:
+        return f"Errore: {e}"
+
+def parse_tool(text):
+    try:
+        match = re.search(r'\{.*"tool":\s*"create_file".*\}', text, re.DOTALL)
+        if match:
+            data = json.loads(match.group(0))
+            if data.get("tool") == "create_file":
+                return create_file_in_dev(data.get("filename"), data.get("content"))
+    except: pass
+    return None
+
+# --- LOGICA PRINCIPALE ---
 def jarvis_brain(user_text):
-    print(f"Brain input: {user_text}")
-    
-    if not user_text:
-        return None
+    print(f"Input: {user_text}")
+    if not user_text: return None
+    clean = user_text.strip().lower()
 
-    clean_text = user_text.strip()
-    lower_text = clean_text.lower()
-
-    # --- MODALITÀ: SCRITTURA AI (AI Writer) ---
-    if lower_text.startswith("scrivi"):
-        if pyautogui is None:
-            return "Errore: Moduli automazione mancanti."
-
-        # Identifica se premere invio alla fine
-        send_mode = "e invia" in lower_text
+    # 1. SCRITTURA RAPIDA
+    if clean.startswith("scrivi"):
+        if not pyautogui: return "No moduli."
+        send = "e invia" in clean
+        prompt = user_text.strip()[6:].replace("e invia", "", 1).strip()
         
-        # Pulisce il prompt (rimuove 'scrivi' e 'e invia')
-        # Esempio: "Scrivi e invia una mail" -> "una mail"
-        prompt = clean_text.replace("scrivi", "", 1).replace("e invia", "", 1).strip()
-        
-        if not prompt:
-            return "Cosa devo scrivere?"
-
-        # 1. GENERAZIONE AI
-        # Usiamo un system prompt che forza l'AI a dare SOLO il testo utile
-        writer_messages = [
-            {"role": "system", "content": "Sei un assistente di scrittura diretta. Genera ESCLUSIVAMENTE il testo richiesto dall'utente. NON aggiungere saluti, preamboli, commenti o virgolette. Il tuo output verrà incollato direttamente in un documento."},
-            {"role": "user", "content": prompt}
-        ]
-
         try:
-            generated_text = ""
-            response = ask(writer_messages)
-            
-            # Estrazione sicura
-            if isinstance(response, dict):
-                if "choices" in response and len(response["choices"]) > 0:
-                    generated_text = response["choices"][0]["message"]["content"]
-                else:
-                    return "Errore nella generazione AI."
-            else:
-                generated_text = str(response)
-
-            # 2. AZIONE FISICA (Incolla)
-            pyperclip.copy(generated_text)
-            time.sleep(0.1)  # Attesa tecnica clipboard
+            # System prompt per scrittura: Solo il testo, niente altro
+            res = ask([{"role": "system", "content": "Genera SOLO il testo richiesto."}, {"role": "user", "content": prompt}])
+            txt = res["choices"][0]["message"]["content"] if isinstance(res, dict) else str(res)
+            pyperclip.copy(txt)
+            time.sleep(0.1)
             pyautogui.hotkey("ctrl", "v")
-            
-            if send_mode:
+            if send:
                 time.sleep(0.2)
                 pyautogui.press("enter")
-                return "Generato e inviato."
-            
-            return "Testo incollato."
+                return "Inviato."
+            return "Fatto."
+        except: return "Errore."
 
-        except Exception as e:
-            return f"Errore scrittura AI: {e}"
-
-    # --- MODALITÀ: ASSISTENTE VOCALE (Standard) ---
-    # Se non inizia con "scrivi", è una chiacchierata normale
-    messages = [
-        {"role": "system", "content": "Sei Jarvis. Rispondi in modo breve e diretto in italiano."},
-        {"role": "user", "content": user_text}
-    ]
+    # 2. INTELLIGENZA GENERALE (Optimized for Speed)
+    # Istruzioni aggiornate: "Risposte telegrafiche"
+    sys_prompt = f"""
+    Sei Jarvis. Rispondi in italiano.
+    
+    DIRETTIVA VELOCITÀ: Sii telegrafico. Usa meno parole possibili.
+    Se devi fare un'azione, falla e basta.
+    
+    PERCORSI:
+    - READ-ONLY: {SELF_PATH}
+    - READ-WRITE: {DEV_PATH}
+    
+    TOOL CREAZIONE FILE (JSON Obbligatorio):
+    {{ "tool": "create_file", "filename": "...", "content": "..." }}
+    """
     
     try:
-        response = ask(messages)
-        if isinstance(response, dict):
-            if "choices" in response and len(response["choices"]) > 0:
-                return response["choices"][0]["message"]["content"]
-        return str(response)
-
+        res = ask([{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_text}])
+        reply = res["choices"][0]["message"]["content"] if isinstance(res, dict) else str(res)
+        
+        tool_out = parse_tool(reply)
+        if tool_out: return tool_out
+        
+        return reply
     except Exception as e:
-        return f"Errore connessione: {str(e)}"
+        return "Errore connessione."

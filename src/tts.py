@@ -1,53 +1,49 @@
-﻿from openai import OpenAI
-import tempfile
-import subprocess
-import os
+﻿import os
+from pathlib import Path
+from openai import OpenAI
+import pygame
 import time
 
-client = OpenAI()
+# Recupera la chiave
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-VLC_PATH = r"C:\Program Files\VideoLAN\VLC\vlc.exe"
-vlc_process = None
-
-def stop_speaking():
-    global vlc_process
-    if vlc_process and vlc_process.poll() is None:
-        vlc_process.kill()
-        vlc_process = None
+# Inizializza il mixer audio (silenzioso, senza finestre)
+try:
+    pygame.mixer.init()
+except Exception as e:
+    print(f"Errore init audio: {e}")
 
 def speak(text):
-    global vlc_process
+    """
+    Genera audio con OpenAI e lo riproduce subito.
+    """
+    if not text: return
 
-    if not text or not text.strip():
-        return
+    try:
+        # Percorso per il file temporaneo
+        speech_file_path = Path(__file__).parent / "speech.mp3"
+        
+        # 1. Chiede l'audio a OpenAI (Alta qualità)
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice="alloy", # Puoi cambiare in "echo", "fable", "onyx", "nova", "shimmer"
+            input=text
+        )
+        
+        # Salva il file
+        response.stream_to_file(speech_file_path)
+        
+        # 2. Riproduce l'audio
+        pygame.mixer.music.load(str(speech_file_path))
+        pygame.mixer.music.play()
+        
+        # Aspetta che finisca di parlare
+        while pygame.mixer.music.get_busy():
+            time.sleep(0.1)
+            
+        # Rilascia il file per poterlo sovrascrivere la prossima volta
+        pygame.mixer.music.unload()
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        audio_path = f.name
-
-    with client.audio.speech.with_streaming_response.create(
-        model="gpt-4o-mini-tts-2025-03-20",
-        voice="alloy",
-        input=text
-    ) as r:
-        r.stream_to_file(audio_path)
-
-    # avvio VLC NON bloccante
-    vlc_process = subprocess.Popen(
-        [
-            VLC_PATH,
-            "--intf", "dummy",
-            "--play-and-exit",
-            audio_path
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
-
-    # aspetta che finisca
-    vlc_process.wait()
-
-    vlc_process = None
-    time.sleep(0.2)
-
-    if os.path.exists(audio_path):
-        os.remove(audio_path)
+    except Exception as e:
+        print(f"Errore TTS: {e}")

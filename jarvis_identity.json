@@ -1,5 +1,6 @@
 {
     "api_key":  "",
     "self_path":  "C:\\\\Users\\\\Administrator\\\\JARVIS_VOICE",
-    "mutable_path":  "C:\\\\Users\\\\Administrator\\\\JARVIS_VOICE\\\\mutable_memory"
+    "mutable_path":  "C:\\\\Users\\\\Administrator\\\\JARVIS_VOICE\\\\mutable_memory",
+    "dev_path":  "C:\\\\Users\\\\Administrator\\\\JARVIS_DEV"
 }
