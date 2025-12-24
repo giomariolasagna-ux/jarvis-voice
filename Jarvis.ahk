@@ -1,25 +1,17 @@
-﻿#Requires AutoHotkey v2
+﻿#Requires AutoHotkey v2.0
 #SingleInstance Force
-Persistent
 
-JARVIS_DIR := "C:\Users\Administrator\JARVIS_VOICE"
-PYTHON_EXE := JARVIS_DIR "\.venv\Scripts\python.exe"
-LOG_FILE := "C:\Temp\jarvis_ahk.log"
+; Configurazione
+TRIGGER_FILE := "C:\Temp\jarvis_trigger.txt"
 
-DirCreate "C:\Temp"
-FileAppend "=== JARVIS AHK START " A_Now " ===`n", LOG_FILE
-
-cmd := '"' PYTHON_EXE '" "src\hotkey.py"'
-
-try {
-    Run cmd, JARVIS_DIR, "Hide", &pid
-    FileAppend "Python started PID=" pid "`n", LOG_FILE
-} catch {
-    FileAppend "Python FAILED to start`n", LOG_FILE
-}
-
-; X1 trigger  file-based (robusto)
+; XButton1 (Tasto laterale mouse) - Scrive solo il trigger
 XButton1::
 {
-    FileAppend "X1`n", "C:\Temp\jarvis_trigger.txt"
+    try {
+        ; Append o creazione file vuoto per segnalare l'evento
+        FileAppend("1", TRIGGER_FILE)
+    } catch as e {
+        ; Logging minimale su file di errore AHK se necessario, altrimenti silenzioso
+        FileAppend(FormatTime() . " - Errore scrittura trigger: " . e.Message . "`n", "C:\Temp\jarvis_ahk.log")
+    }
 }
