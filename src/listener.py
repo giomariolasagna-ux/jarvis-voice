@@ -1,54 +1,101 @@
-﻿import speech_recognition as sr
+﻿import sounddevice as sd
+import soundfile as sf
+import numpy as np
+import io
+import os
+import queue
+from openai import OpenAI
 
-# PAROLA CHIAVE DA CERCARE (Parte del nome del tuo microfono)
+# Configurazione OpenAI
+try:
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+except:
+    client = None
+
 TARGET_MIC_NAME = "LifeCam"
 
-def get_mic_index():
-    """Cerca l'indice del microfono basandosi sul nome."""
+def get_mic_device():
+    """Trova il dispositivo LifeCam usando SoundDevice"""
     try:
-        mics = sr.Microphone.list_microphone_names()
-        for i, name in enumerate(mics):
-            if TARGET_MIC_NAME in name:
-                print(f"--- [AUTO-DETECT] Trovato {name} all indice {i} ---")
+        devices = sd.query_devices()
+        for i, d in enumerate(devices):
+            # Cerca un dispositivo di INPUT (>0 canali) con il nome giusto
+            if d["max_input_channels"] > 0 and TARGET_MIC_NAME in d["name"]:
+                print(f"--- [AUDIO] Mic trovato: [{i}] {d['name']} ---")
                 return i
-    except:
-        pass
-    print("--- [AUTO-DETECT] LifeCam non trovata, uso Default ---")
-    return None # Usa il default di sistema
+    except Exception as e:
+        print(f"Errore ricerca mic: {e}")
+    
+    print("--- [AUDIO] Uso dispositivo di default ---")
+    return None
 
-def listen():
-    r = sr.Recognizer()
+def listen_ptt(is_button_held_fn):
+    if not client:
+        print("ERRORE: API Key mancante.")
+        return None
+
+    device_idx = get_mic_device()
+    q = queue.Queue()
+
+    # Funzione che viene chiamata dalla scheda audio ogni volta che ha dati
+    def callback(indata, frames, time, status):
+        if status:
+            print(f"Stato Audio: {status}")
+        # Copia i dati nella coda
+        q.put(indata.copy())
+
+    print("PTT: Premi e parla... (Registrazione attiva)")
     
-    # --- PARAMETRI DI ASCOLTO (VELOCI) ---
-    r.energy_threshold = 400      # Soglia fissa (Niente calibrazione lenta)
-    r.dynamic_energy_threshold = False 
-    r.pause_threshold = 0.6       # Pausa breve per chiudere
-    
-    # TROVA IL MICROFONO GIUSTO ORA
-    mic_idx = get_mic_index()
+    # Dati audio raccolti
+    audio_blocks = []
 
     try:
-        # Apre il microfono trovato
-        with sr.Microphone(device_index=mic_idx) as source:
-            print("Ascolto...")
+        # Apre lo stream a 16kHz (Standard Whisper) Mono
+        with sd.InputStream(samplerate=16000, device=device_idx, channels=1, callback=callback):
             
-            try:
-                # Timeout: Smette se non parli entro 5s
-                # Limit: Taglia se parli troppo (10s)
-                audio = r.listen(source, timeout=5, phrase_time_limit=10)
+            # CICLO DI REGISTRAZIONE SINCRONIZZATO
+            while is_button_held_fn():
+                # Raccogli tutto ciò che è nella coda
+                while not q.empty():
+                    audio_blocks.append(q.get())
                 
-                print("Elaborazione...")
-                text = r.recognize_google(audio, language="it-IT")
-                return text
-                
-            except sr.WaitTimeoutError:
-                return None
-            except sr.UnknownValueError:
-                return None
-            except Exception as e:
-                print(f"Errore SR: {e}")
-                return None
-                
-    except OSError:
-        print(f"Errore: Impossibile accedere al microfono {mic_idx}")
+                # Piccola pausa per non fondere la CPU, ma l'audio è gestito dal callback
+                sd.sleep(50) 
+            
+            # Recupera gli ultimi dati rimasti
+            while not q.empty():
+                audio_blocks.append(q.get())
+
+        # --- FINE REGISTRAZIONE ---
+        if not audio_blocks:
+            return None
+            
+        print(f"Rilascio. Elaborazione {len(audio_blocks)} blocchi audio...")
+
+        # 1. Concatena i blocchi numpy in un unico array
+        recording = np.concatenate(audio_blocks, axis=0)
+
+        # 2. Salva in un buffer di memoria come WAV
+        wav_buffer = io.BytesIO()
+        sf.write(wav_buffer, recording, 16000, format="WAV")
+        wav_buffer.seek(0)
+        wav_buffer.name = "ptt.wav"
+
+        # 3. Invia a OpenAI
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1", 
+            file=wav_buffer,
+            language="it"
+        )
+        
+        text = transcript.text.strip()
+        
+        # Filtro Allucinazioni
+        if not text or "Sottotitoli" in text or "Amara.org" in text:
+            return None
+            
+        return text
+
+    except Exception as e:
+        print(f"Errore PTT (SoundDevice): {e}")
         return None

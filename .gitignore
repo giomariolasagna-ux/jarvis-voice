@@ -5,3 +5,9 @@ C:/Temp/
 logs/
 *.log
 .env
+
+*.wav
+
+__pycache__/
+
+.DS_Store

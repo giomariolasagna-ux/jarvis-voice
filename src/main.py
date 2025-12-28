@@ -1,55 +1,64 @@
 ﻿import time
 import os
 import sys
-from pathlib import Path
+import threading
+from pynput import mouse
 
-# --- FIX IMPORTAZIONI CRITICO ---
-# 1. Aggiunge la cartella 'src' (per importare brain, listener, tts)
 sys.path.append(os.path.dirname(__file__))
-# 2. Aggiunge la cartella ROOT del progetto (per supportare 'from src.moonshot_client')
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import listener
 import brain
 import tts
 
-# PERCORSO TRIGGER (Temp)
-TRIGGER_FILE = Path(r"C:\Temp\jarvis_trigger.txt")
+# STATO GLOBALE DEL TASTO
+BUTTON_HELD = False
+IS_WORKING = False
+
+def worker_vocale():
+    global IS_WORKING, BUTTON_HELD
+    
+    if IS_WORKING: return
+    IS_WORKING = True
+    
+    try:
+        # Passiamo una "lambda" che controlla la variabile globale
+        # Il listener continuerà a registrare finché BUTTON_HELD è True
+        user_text = listener.listen_ptt(lambda: BUTTON_HELD)
+        
+        if user_text:
+            print(f"\nTu: {user_text}")
+            response = brain.jarvis_brain(user_text)
+            if response:
+                print(f"Jarvis: {response}")
+                tts.speak(response)
+        else:
+            print(".", end="", flush=True) # Feedback visivo minimo
+            
+    except Exception as e:
+        print(f"Errore: {e}")
+    finally:
+        IS_WORKING = False
+
+def on_click(x, y, button, pressed):
+    global BUTTON_HELD
+    
+    # Controlla se è il tasto X1
+    if hasattr(button, "name") and button.name == "x1":
+        BUTTON_HELD = pressed # Aggiorna lo stato (True=Premuto, False=Rilasciato)
+        
+        if pressed and not IS_WORKING:
+            # Avvia il thread solo quando si preme
+            t = threading.Thread(target=worker_vocale, daemon=True)
+            t.start()
 
 def main():
-    print("--- JARVIS DAEMON STABLE ---")
-    print(f"Monitoraggio file: {TRIGGER_FILE}")
-    print(f"Path Root aggiunto: {sys.path[-1]}")
+    print("--- JARVIS PUSH-TO-TALK ---")
+    print("MODALITÀ WALKIE-TALKIE ATTIVA")
+    print("1. Tieni premuto X1 -> Parla")
+    print("2. Rilascia X1 -> Jarvis risponde")
     
-    # Assicura cartella temp
-    TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
-    
-    if TRIGGER_FILE.exists():
-        try: os.remove(TRIGGER_FILE)
-        except: pass
-
-    while True:
-        if TRIGGER_FILE.exists():
-            print("\n>>> TRIGGER RILEVATO <<<")
-            try:
-                os.remove(TRIGGER_FILE)
-            except:
-                time.sleep(0.1)
-                continue
-
-            # Ascolta
-            try:
-                user_text = listener.listen()
-                if user_text:
-                    print(f"Tu: {user_text}")
-                    response = brain.jarvis_brain(user_text)
-                    if response:
-                        print(f"Jarvis: {response}")
-                        tts.speak(response)
-            except Exception as e:
-                print(f"Errore: {e}")
-                
-        time.sleep(0.1)
+    # Listener non bloccante per non fermare il thread principale se servisse
+    with mouse.Listener(on_click=on_click) as l:
+        l.join()
 
 if __name__ == "__main__":
     main()
