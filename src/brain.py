@@ -5,69 +5,105 @@ import traceback
 from pathlib import Path
 
 # ==================================================================================
-# 1. CONFIGURAZIONE AMBIENTALE (NON TOCCARE)
+# 1. CONFIGURAZIONE AMBIENTALE
 # ==================================================================================
 CORE_PATH = Path(r"C:\Users\Administrator\JARVIS_VOICE")
 DEV_PATH = Path(r"C:\Users\Administrator\JARVIS_DEV")
 IDENTITY_PATH = CORE_PATH / "jarvis_identity.json"
 
-# Importazione client API robusta
 try:
     from src.moonshot_client import ask
 except ImportError:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from src.moonshot_client import ask
 
-# ==================================================================================
-# 2. GESTIONE MEMORIA E IDENTITÀ
-# ==================================================================================
 def load_identity():
-    """Carica la configurazione di Jarvis se esiste"""
     try:
         if IDENTITY_PATH.exists():
             with open(IDENTITY_PATH, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except Exception as e:
-        print(f"Warn: Impossibile caricare identity: {e}")
+    except:
+        pass
     return {}
 
 IDENTITY = load_identity()
 
 # ==================================================================================
-# 3. LOGICA DI SELEZIONE PROMPT (IL "CERVELLO")
+# 2. SISTEMA VISIONE E LETTURA
 # ==================================================================================
-def get_system_prompt(mode, user_text):
-    """Restituisce il prompt di sistema in base alla modalità"""
+def get_known_files_map():
+    file_map = {}
+    src_path = CORE_PATH / "src"
+    if src_path.exists():
+        for f in src_path.glob("*.py"):
+            file_map[f.name.lower()] = f
+    return file_map
+
+def read_file_content(filename_part):
+    fmap = get_known_files_map()
+    for fname in sorted(fmap.keys(), key=len, reverse=True):
+        if filename_part in fname:
+            try:
+                path = fmap[fname]
+                return path.name, path.read_text(encoding="utf-8", errors="ignore")[:20000]
+            except:
+                return None, None
+    return None, None
+
+def get_anatomy_string():
+    fmap = get_known_files_map()
+    src_files = [f.name for n, f in fmap.items()]
+    return f"\n[FILE VISIBILI SRC]: {', '.join(src_files)}\n"
+
+def read_relevant_file(user_text):
+    lowered = user_text.lower()
+    fmap = get_known_files_map()
+    for fname in sorted(fmap.keys(), key=len, reverse=True):
+        if fname in lowered:
+            target_path = fmap[fname]
+            try:
+                content = target_path.read_text(encoding="utf-8", errors="ignore")[:15000]
+                return f"\n--- [CONTENUTO {target_path.name}] ---\n{content}\n--- [FINE] ---\n"
+            except:
+                pass
+    return ""
+
+# ==================================================================================
+# 3. PROMPTS SPECIALIZZATI
+# ==================================================================================
+def get_system_prompt(mode, user_text, file_name="", file_content=""):
     
-    if mode == "WRITE":
+    if mode == "modify_system":
         return (
-            "Sei un motore di scrittura pura. "
-            "Il tuo compito è generare ESATTAMENTE il testo richiesto dall'utente. "
-            "NON aggiungere introduzioni, NON aggiungere conclusioni, NON conversare. "
-            "Output atteso: Solo il testo finale."
-        )
-    
-    elif mode == "CODE":
-        return (
-            "Sei un assistente di programmazione esperto (Jarvis Coding Module). "
-            "L'utente vuole creare file o script. "
-            "1. Fornisci il codice completo e funzionante. "
-            "2. Usa commenti nel codice per spiegare, non parlare troppo fuori dal codice. "
-            "3. Sii tecnico e preciso."
+            f"Sei un SENIOR SOFTWARE ENGINEER. Devi riscrivere il file '{file_name}'.\n"
+            "OBIETTIVO: Integrare la richiesta utente nel codice esistente.\n"
+            "REGOLE ASSOLUTE:\n"
+            "1. Restituisci SOLAMENTE IL CODICE PYTHON DEL FILE COMPLETO.\n"
+            "2. NON usare blocchi markdown (`python). Solo testo puro.\n"
+            "3. NON aggiungere commenti introduttivi o finali.\n"
+            "4. Il codice deve essere pronto all'uso, con tutti gli import necessari.\n"
+            f"--- CODICE ORIGINALE ---\n{file_content}\n--- FINE ---\n"
         )
 
-    else: # SPEAK (Default)
-        base_prompt = (
-            "SEI JARVIS. Un assistente vocale avanzato residente sul computer locale. "
-            "NON sei un modello linguistico generico. "
-            "Rispondi in italiano. Sii conciso, efficiente e leggermente ironico (stile Tony Stark/Jarvis). "
-            f"Il tuo path principale è: {CORE_PATH}. "
-            f"La tua area di sviluppo è: {DEV_PATH}. "
+    elif mode == "write":
+        return "Sei un motore di scrittura. Genera solo il testo richiesto."
+    
+    elif mode == "create_file":
+        return (
+            "Sei un Coding Assistant. "
+            "Rispondi SOLO con un blocco JSON: { \"filename\": \"nome.est\", \"code\": \"...\" }"
         )
-        return base_prompt
+        
+    else: # speak
+        anatomy = get_anatomy_string()
+        return (
+            "SEI JARVIS. Assistente vocale. "
+            "Se ti chiedono di modificare il sistema, analizza ma non eseguire se non richiesto esplicitamente.\n"
+            f"Path: {DEV_PATH}.\n{anatomy}\n{file_content}"
+        )
 
 # ==================================================================================
-# 4. FUNZIONE PRINCIPALE (CHIAMATA DA MAIN.PY)
+# 4. LOGICA CENTRALE
 # ==================================================================================
 def jarvis_brain(user_text):
     print(f"Brain Input: {user_text}")
@@ -75,51 +111,70 @@ def jarvis_brain(user_text):
     
     lowered = user_text.lower().strip()
     
-    # --- A. RILEVAMENTO INTENTO (ROUTER) ---
-    mode = "SPEAK"
+    # --- RILEVAMENTO INTENTO ---
+    mode = "speak"
+    target_file = None
+    file_content = None
+
+    if "modifica" in lowered or "aggiungi funzionalit" in lowered:
+        fmap = get_known_files_map()
+        for fname in fmap.keys():
+            if fname in lowered:
+                mode = "modify_system"
+                target_file, file_content = read_file_content(fname)
+                break
     
-    if lowered.startswith("scrivi ") or lowered == "scrivi":
-        mode = "WRITE"
-    elif any(x in lowered for x in ["crea file", "codice per", "script per", "funzione python"]):
-        mode = "CODE"
+    elif lowered.startswith("scrivi "):
+        mode = "write"
+    elif "crea file" in lowered:
+        mode = "create_file"
 
-    print(f"--- AZIONE: {mode} ---")
+    print(f"--- AZIONE: {mode} (File: {target_file}) ---")
 
-    # --- B. PREPARAZIONE MESSAGGI ---
-    system_content = get_system_prompt(mode, user_text)
+    # Recupero contesto per Speak Mode
+    extra_context = ""
+    if mode == "speak":
+        extra_context = read_relevant_file(user_text)
+
     messages = [
-        {"role": "system", "content": system_content},
+        {"role": "system", "content": get_system_prompt(mode, user_text, target_file, file_content or extra_context)},
         {"role": "user", "content": user_text}
     ]
 
-    # --- C. ESECUZIONE CHIAMATA API ---
     try:
-        # Nota: Timeout gestito all'interno di moonshot_client
         response = ask(messages)
-
-        # Gestione risposta grezza o dizionario
         content = ""
+
         if isinstance(response, dict):
             if "error" in response:
-                # Gestione errori API nidificati o stringa
-                err = response["error"]
-                msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-                return f"Errore Sistema: {msg}"
-                
-            if "choices" in response and len(response["choices"]) > 0:
+                return {"mode": "speak", "content": f"Errore API: {response['error']}"}
+            if "choices" in response and len(response['choices']) > 0:
                 content = response["choices"][0]["message"]["content"].strip()
-            else:
-                return "Nessuna risposta intelligibile dai sensori."
-        else:
-            # Fallback se response non è dict
-            return f"Errore formato risposta: {type(response)}"
+        
+        # --- GESTIONE SPECIALE MODIFY ---
+        # Impacchettiamo noi il JSON per evitare errori di sintassi dell'LLM
+        if mode == "modify_system":
+            # Pulizia eventuale markdown residuo
+            clean_code = content.replace("`python", "").replace("`", "").strip()
+            
+            # Creazione pacchetto sicuro per Main.py
+            safe_payload = json.dumps({
+                "filename": f"src/{target_file}",
+                "code": clean_code
+            })
+            
+            return {
+                "mode": "create_file",
+                "content": safe_payload,
+                "base_path": str(DEV_PATH)
+            }
 
-        # --- D. POST-PROCESSING (Opzionale) ---
-        # Qui potremmo salvare il file se siamo in mode CODE e abbiamo implementato la logica
-        # Per ora restituiamo il testo (codice o parlato)
-        return content
+        return {
+            "mode": mode,
+            "content": content,
+            "base_path": str(DEV_PATH)
+        }
 
     except Exception:
-        print("\n--- CRITICAL ERROR IN BRAIN ---")
         traceback.print_exc()
-        return "Errore critico nei circuiti logici. Controllare log."
+        return {"mode": "speak", "content": "Errore critico circuiti."}
